@@ -39,7 +39,7 @@ with st.form("add_task_form", clear_on_submit = True):
             "SEDE_TECNICA": sede,
             "SN_ASSET": asset,
             "DATA": data,
-            "OPERATORE": opratore,
+            "OPERATORE": operatore,
             "INTERVENTO": intervento,
             "NOTE": note,
         }
