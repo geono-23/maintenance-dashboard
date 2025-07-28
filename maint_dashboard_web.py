@@ -3,7 +3,7 @@ import pandas as pd
 import os
 
 CSV_FILE = "MAINT_LIST.csv"
-SEPARATOR = ";"  # important for European Excel formats
+SEPARATOR = ","  # important for European Excel formats
 
 # === Load data ===
 if os.path.exists(CSV_FILE):
@@ -80,7 +80,7 @@ st.dataframe(filtered_df, use_container_width = True)
 if not filtered_df.empty:
     st.download_button(
         label = "📥 Scarica interventi filtrati (CSV)",
-        data = filtered_df.csv(index = False, sep = SEPARATOR),
+        data = filtered_df.to_csv(index = False, sep = SEPARATOR),
         file_name = "interventi_filtrati.csv"
     )
 
