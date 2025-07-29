@@ -1,89 +1,84 @@
 import streamlit as st
 import pandas as pd
+import gspread
 import os
+from oauth2client.service_account import ServiceAccountCredentials
+import json
+import tempfile
 
-CSV_FILE = "MAINT_LIST.csv"
-SEPARATOR = ","  # important for European Excel formats
+# === Set page title ===
+st.set_page_config(page_title = "Maintenance Dashboard", layout = "wide")
+st.title("🔧 Maintenance Dashboard")
 
-# === Load data ===
-if os.path.exists(CSV_FILE):
-    df = pd.read_csv(CSV_FILE, sep=SEPARATOR)
-else:
-    df = pd.DataFrame(columns=[
-        "ID_INTERVENTO", "SEDE_TECNICA", "SN_ASSET",
-        "DATA", "OPERATORE", "INTERVENTO", "NOTE"
-    ])
+# === Authenticate with Google Sheets ===
+creds_dict = dict(st.secrets["google_service_account"])
 
-st.set_page_config(page_title="Maintenance Dashboard", layout="wide")
-st.title("🛠️ Maintenance Dashboard")
+with tempfile.NamedTemporaryFile(mode = 'w', delete = False) as f:
+    json.dump(creds_dict, f)
+    f.flush()
+    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+    creds = ServiceAccountCredentials.from_json_keyfile_name(f.name, scope)
+    client = gspread.authorize(creds)
 
-# === Add new manintenance entry ===
+# === Load worksheet ===
+try:
+    sheet = client.open("maint_sheet").sheet1
+except gspread.SpreadsheetNotFound:
+    st.error("❌ Google Sheet not found. Check the name and sharing settings.")
+    st.stop()
 
+# === Read Existing Data === 
+data = sheet.get_all_records()
+df = pd.DataFrame(data)
+
+# === Form for new entry ===
 st.subheader("➕ Aggiungi un nuovo intervento")
-with st.form("add_task_form", clear_on_submit = True):
-    col1, col2 = st.columns(2)
-    with col1:
-        id_intervento = st.text_input("ID Intervento")
-        asset = st.text_input("Seriale asset")
-        data = st.date_input("Data intervento")
-        operatore = st.text_input("Operatore")
-    with col2:
-        sede = st.text_input("Sede Tecnica")
-        intervento = st.text_input("Intervento effettuato")
-        note = st.text_input("Note (facoltativo)")
+with st.form("entry_form", clear_on_submit=True):
+    id_intervento = st.text_input("ID Intervento")
+    sede = st.text_input("Sede Tecnica")
+    asset = st.text_input("Seriale Asset")
+    data_interv = st.date_input("Data Intervento")
+    operatore = st.text_input("Operatore")
+    intervento = st.text_input("Intervento")
+    note = st.text_input("Note (facoltativo)")
 
-    submitted = st.form_submit_button("✅ Aggiungi")
+    submitted = st.form_submit_button("Aggiungi")
+
     if submitted:
-        new_entry = {
-            "ID_INTERVENTO": id_intervento,
-            "SEDE_TECNICA": sede,
-            "SN_ASSET": asset,
-            "DATA": data,
-            "OPERATORE": operatore,
-            "INTERVENTO": intervento,
-            "NOTE": note,
-        }
-        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index = True)
-        df.to_csv(CSV_FILE, index = False, sep = SEPARATOR)
-        st.success("✅ Intervento aggiunto con successo!")
- 
+        new_row = [id_intervento, sede, asset, str(data_interv), operatore, intervento, note]
+        try:
+            sheet.append_row(new_row)
+            st.success("✅ Intervento aggiunto con successo!")
+        except Exception as e:
+            st.error(f"Errore nel salvataggio: {e}")
 
-# === Filters ===
+# --- Reload updated data ---
+data = sheet.get_all_records()
+df = pd.DataFrame(data)
+
+# --- Filters ---
+st.subheader("🔍 Filtra interventi")
+
 if not df.empty:
-    st.subheader("🔍 Filtra interventi")
-    filter_col1, filter_col2 =st.columns(2)
+    assets = ["Tutti"] + sorted(df["Seriale Asset"].dropna().unique().tolist())
+    operators = ["Tutti"] + sorted(df["Operatore"].dropna().unique().tolist())
 
-    asset_options = ["Tutti"] + sorted(df["SN_ASSET"].dropna().unique().tolist())
-    operator_options = ["Tutti"] + sorted(df["OPERATORE"].dropna().unique().tolist())
-
-    with filter_col1:
-        selected_asset = st.selectbox("🔧 Asset", asset_options)
-    with filter_col2:
-        selected_operator = st.selectbox("👷‍♂️ Operatore", operator_options)
+    selected_asset = st.selectbox("📦 Filtro per asset", assets)
+    selected_operator = st.selectbox("👷‍♂️ Filtro per operatore", operators)
 
     filtered_df = df.copy()
     if selected_asset != "Tutti":
-        filtered_df = filtered_df[filtered_df["SN_ASSET"] == selected_asset]
+        filtered_df = filtered_df[filtered_df["Seriale Asset"] == selected_asset]
     if selected_operator != "Tutti":
-        filtered_df = filtered_df[filtered_df["OPERATORE"] == selected_operator]
+        filtered_df = filtered_df[filtered_df["Operatore"] == selected_operator]
 
+    # --- Show table ---
+    st.subheader("📋 Interventi registrati")
+    st.dataframe(filtered_df, use_container_width=True)
+
+    # --- Download filtered data ---
+    csv = filtered_df.to_csv(index=False).encode("utf-8")
+    st.download_button("📥 Scarica CSV", data=csv, file_name="interventi.csv")
 else:
-    filtered_df = df
-    st.info("📭 Nessun intervento ancora registrato.")
-
-
-# === Display filtered results ===
-st.subheader("📋 Interventi registrati")
-st.dataframe(filtered_df, use_container_width = True)
-
-# === Download button ===
-if not filtered_df.empty:
-    st.download_button(
-        label = "📥 Scarica interventi filtrati (CSV)",
-        data = filtered_df.to_csv(index = False, sep = SEPARATOR),
-        file_name = "interventi_filtrati.csv"
-    )
-
-st.caption("App web di manutenzione")
-
+    st.info("📭 Nessun intervento registrato ancora.")
 
