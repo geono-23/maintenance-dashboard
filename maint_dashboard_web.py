@@ -1,39 +1,29 @@
 import streamlit as st
-import pandas as pd
 import gspread
-import os
-from oauth2client.service_account import ServiceAccountCredentials
-import json
-import tempfile
-
-# === Set page title ===
-st.set_page_config(page_title = "Maintenance Dashboard", layout = "wide")
-st.title("🔧 Maintenance Dashboard")
+from google.oauth2.service_account import Credentials
+from datetime import datetime
+import pandas as pd
 
 # === Authenticate with Google Sheets ===
-creds_dict = dict(st.secrets["google_service_account"])
+scope = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
+creds = Credentials.from_service_account_info(st.secrets["google_service_account"], scopes = scope)
+client = gspread.authorize(creds)
 
-with tempfile.NamedTemporaryFile(mode = 'w', delete = False) as f:
-    json.dump(creds_dict, f)
-    f.flush()
-    scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name(f.name, scope)
-    client = gspread.authorize(creds)
-
-# === Load worksheet ===
+# Open the Google Sheet
 try:
     sheet = client.open("maint_sheet").sheet1
 except gspread.SpreadsheetNotFound:
-    st.error("❌ Google Sheet not found. Check the name and sharing settings.")
+    st.error("❌ Google Sheet 'maint_sheet' not found. Make sure it exists and is shared with your service account email.")
     st.stop()
 
-# === Read Existing Data === 
-data = sheet.get_all_records()
-df = pd.DataFrame(data)
+# Streamlit UI 
+st.set_page_config(page_title = "Maintenance Dashboard", layout = "wide")
+st.title("🛠️ Maintenance Log Dashboard")
 
 # === Form for new entry ===
+
 st.subheader("➕ Aggiungi un nuovo intervento")
-with st.form("entry_form", clear_on_submit=True):
+with st.form("log_form"):
     id_intervento = st.text_input("ID Intervento")
     sede = st.text_input("Sede Tecnica")
     asset = st.text_input("Seriale Asset")
@@ -45,40 +35,56 @@ with st.form("entry_form", clear_on_submit=True):
     submitted = st.form_submit_button("Aggiungi")
 
     if submitted:
-        new_row = [id_intervento, sede, asset, str(data_interv), operatore, intervento, note]
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        new_row = [timestamp, id_intervento, sede, asset, str(data_interv), operatore, intervento, note]
         try:
             sheet.append_row(new_row)
             st.success("✅ Intervento aggiunto con successo!")
         except Exception as e:
-            st.error(f"Errore nel salvataggio: {e}")
+            st.success(f"Errore nel salvataggio: {e}")
+        
+        else:
+            st.warning("⚠️ Please fill in all fields before submitting.")
 
-# --- Reload updated data ---
-data = sheet.get_all_records()
-df = pd.DataFrame(data)
+
+##################################################################
+
 
 # --- Filters ---
-st.subheader("🔍 Filtra interventi")
+data = sheet.get_all_values()
+if data:
+    df = pd.DataFrame(data[1:], columns = data[0])
+    #df["Timestamp"] = pd.to_datetime(df)
 
-if not df.empty:
-    assets = ["Tutti"] + sorted(df["Seriale Asset"].dropna().unique().tolist())
-    operators = ["Tutti"] + sorted(df["Operatore"].dropna().unique().tolist())
+    st.subheader("🔍 Filtra interventi")
 
-    selected_asset = st.selectbox("📦 Filtro per asset", assets)
-    selected_operator = st.selectbox("👷‍♂️ Filtro per operatore", operators)
+    col1, col2 =st.columns(2)
 
+    with col1:
+        machine_filter = st.selectbox("Filter by machine", options=["All"] + sorted(df["Seriale Asset"].unique().tolist()))
+    with col2:
+        tech_filter = st.selectbox("Filter by technician", options=["All"] + sorted(df["Operatore"].unique().tolist()))
+
+    date_range = st.date_input("Filter by date range", [])
+
+    # Apply filters
     filtered_df = df.copy()
-    if selected_asset != "Tutti":
-        filtered_df = filtered_df[filtered_df["Seriale Asset"] == selected_asset]
-    if selected_operator != "Tutti":
-        filtered_df = filtered_df[filtered_df["Operatore"] == selected_operator]
+    if machine_filter != "All":
+        filtered_df = filtered_df[filtered_df["Seriale Asset"] == machine_filter]
+    if tech_filter != "All":
+        filtered_df = filtered_df[filtered_df["Operatore"] == tech_filter]
+    if len(date_range) == 2:
+        start, end = pd.to_datetime(date_range)
+        filtered_df = filtered_df[(filtered_df["Timestamp"] >= start) & (filtered_df["Timestamp"] <= end)]
 
-    # --- Show table ---
-    st.subheader("📋 Interventi registrati")
     st.dataframe(filtered_df, use_container_width=True)
+
 
     # --- Download filtered data ---
     csv = filtered_df.to_csv(index=False).encode("utf-8")
     st.download_button("📥 Scarica CSV", data=csv, file_name="interventi.csv")
+
+    
 else:
-    st.info("📭 Nessun intervento registrato ancora.")
+    st.info("Sheet is empty.")
 
