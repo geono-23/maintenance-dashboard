@@ -24,7 +24,6 @@ st.title("🛠️ Maintenance Log Dashboard")
 
 st.subheader("➕ Aggiungi un nuovo intervento")
 with st.form("log_form"):
-    time_stamp = st.text_input("Timestamp")
     id_intervento = st.text_input("ID Intervento")
     sede = st.text_input("Sede Tecnica")
     asset = st.text_input("Seriale Asset")
@@ -37,7 +36,7 @@ with st.form("log_form"):
 
     if submitted:
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        new_row = [timestamp, id_intervento, sede, asset, str(data_interv), operatore, intervento, note]
+        new_row = [id_intervento, sede, asset, str(data_interv), operatore, intervento, note, timestamp]
         try:
             sheet.append_row(new_row)
             st.success("✅ Intervento aggiunto con successo!")
